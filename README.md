@@ -14,9 +14,13 @@
 ## Create github repository
 export $(grep -v '^#' .env | xargs)
 echo $GITHUB_TOKEN
-git remote add origin https://$GITHUB_TOKEN@github.com/jesvin1/mlops.git
+git init
+git add .
+git commit -m "first commit"
+git branch -M main
 
-
+git remote add origin https://$GITHUB_TOKEN@github.com/jesvin1/AWS_Sagemaker_Assignment_V01.git
+git push -u origin main
 
 
 ## Setting up the default AWS variables
@@ -48,15 +52,8 @@ aws s3api put-bucket-versioning --bucket "${PIPELINE_BUCKET}" --versioning-confi
 ## Create Container Image Repository in Elastic Container Registry
 - Create a Private Repository with repo name as `abalone`
 
-## ETL assets
-git checkout -b etl
-cd etl/
-git add . &&\
-git commit -m "initial commit of etl assets" &&\
-git push --set-upstream origin etl
-cd ..
+
 ## Training Assets
-git checkout -b model
 ```
 - Modify the `trainingjob.json` as follows:
     - *Replace Account id with respective Account id*
@@ -65,15 +62,53 @@ git checkout -b model
 sed -i "s/<AccountId>/${AWS_ACCOUNT_ID}/" model/trainingjob.json
 sed -i "s/<Region>/${AWS_DEFAULT_REGION}/" model/trainingjob.json
 
-## create a new service role for Sagemaker with name as `MLOps`
-
+## Create Docker Container - Train & Test
+```
 cd model/
-- push the code to master branch
+aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin 763104351884.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+docker build --build-arg REGION=$AWS_DEFAULT_REGION -f Dockerfile -t tf_model:1.0 .
 ```
-git add . &&\
-git commit -m "Initial commit of model assets" &&\
-git push --set-upstream origin model
-git checkout -b feature-branch
-git push origin feature-branch
+## For Unit testing
+```
+cd ..
+cd tests/unit_test/
+mkdir -p model && \
+mkdir -p output
+docker run --rm --name 'my_model' \
+    -v "$PWD/model:/opt/ml/model" \
+    -v "$PWD/output:/opt/ml/output" \
+    -v "$PWD/input:/opt/ml/input" tf_model:1.0 train
+```
+## Test of Prediction
+- Prediction
+```
+docker run --rm --name 'my_model' \
+-v "$PWD/model:/opt/ml/model" \
+-v "$PWD/output:/opt/ml/output" \
+-v "$PWD/input:/opt/ml/input" tf_model:1.0 test \
+"[[4.400000000000000022e-01,3.449999999999999734e-01,1.000000000000000056e-01,3.659999999999999920e-01,1.219999999999999973e-01,9.049999999999999711e-02,1.199999999999999956e-01,0.000000000000000000e+00,1.000000000000000000e+00,0.000000000000000000e+00]]"
+```
+
+## Serve on Port:8080
+```
+docker run --rm --name 'my_model' \
+    -p 8080:8080 \
+    -v "$PWD/model:/opt/ml/model" \
+    -v "$PWD/output:/opt/ml/output" \
+    -v "$PWD/input:/opt/ml/input" tf_model:1.0 serve
 
 ```
+
+## Test the API
+```
+change the directory in new terminal to unit_test
+python3 app_test.py
+
+- Modify threshold value
+```
+ cd ..
+ cd system_test/
+sed -i "s/<Threshold>/3.1/" ./buildspec.yml
+```
+
